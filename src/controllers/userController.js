@@ -1,7 +1,11 @@
 import crypto from 'crypto'
 import User from '../models/User.js'
+import Client from '../models/Client.js'
+import Influencer from '../models/Influencer.js'
 import { sendEmail } from '../services/emailService.js'
 import { otpTemplate } from '../Email Tamplates/otpTemplate.js'
+import { clientAddedTemplate } from '../Email Tamplates/clientAddedTemplate.js'
+import { influencerAddedTemplate } from '../Email Tamplates/influencerAddedTemplate.js'
 
 export const listUsers = async (req, res, next) => {
   try {
@@ -14,24 +18,49 @@ export const listUsers = async (req, res, next) => {
 
 export const createUser = async (req, res, next) => {
   try {
-    const { name, email, role = 'client' } = req.body || {}
-    if (!name || !email) {
-      return res.status(400).json({ error: 'name and email are required' })
+    const {
+      name,
+      email,
+      role = 'client',
+      phoneNumber,
+      profilePictures,
+      companyName,
+      industry,
+      website,
+      campaigns,
+      niche,
+      followers,
+      engagement,
+      instagramHandle
+    } = req.body || {}
+    if (!name || !email || !phoneNumber) {
+      return res.status(400).json({ error: 'name, email and phoneNumber are required' })
     }
     if (!['influencer', 'client'].includes(role)) {
       return res.status(400).json({ error: 'invalid role' })
     }
-    const existing = await User.findOne({ email })
-    if (existing) {
+    const existingEmail = await User.findOne({ email })
+    if (existingEmail) {
       return res.status(409).json({ error: 'Email already exists' })
     }
-    const user = await User.create({ name, email, role, createdByAdmin: true })
-    const subject = 'Welcome to Kingfluencer'
-    const html = `<div><p>Hi ${name},</p><p>Welcome to Kingfluencer.</p></div>`
-    try {
-      await sendEmail({ to: email, subject, html })
-    } catch {}
-    res.status(201).json(user)
+    const existingPhone = await User.findOne({ phoneNumber })
+    if (existingPhone) {
+      return res.status(409).json({ error: 'Phone number already exists' })
+    }
+    const user = await User.create({ name, email, role, createdByAdmin: true, phoneNumber, profilePictures })
+    let profile = null
+    if (role === 'client') {
+      profile = await Client.create({ userId: user._id, companyName, industry, website, campaigns: Number(campaigns) || 0, niche })
+      const subject = 'You have been added as a Client'
+      const html = clientAddedTemplate({ name, companyName, industry, website, campaigns: Number(campaigns) || 0 })
+      try { await sendEmail({ to: email, subject, html }) } catch {}
+    } else {
+      profile = await Influencer.create({ userId: user._id, followers, engagement, niche, instagramHandle })
+      const subject = 'You have been added as an Influencer'
+      const html = influencerAddedTemplate({ name, followers, engagement, niche, instagramHandle })
+      try { await sendEmail({ to: email, subject, html }) } catch {}
+    }
+    res.status(201).json({ user, profile })
   } catch (err) {
     next(err)
   }
