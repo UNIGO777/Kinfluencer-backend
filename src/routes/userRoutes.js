@@ -1,10 +1,11 @@
 import { Router } from 'express'
-import { listUsers, createUser, sendCustomEmail, requestOtp, verifyOtp } from '../controllers/userController.js'
+import { listUsers, searchUsers, createUser, sendCustomEmail, requestOtp, verifyOtp } from '../controllers/userController.js'
 import { requireAdmin, requireClient, requireInfluencer } from '../services/authService.js'
 
 const router = Router()
 
 router.get('/', requireAdmin, listUsers)
+router.get('/search', requireAdmin, searchUsers)
 router.post('/', requireAdmin, createUser)
 router.post('/send-email', requireAdmin, sendCustomEmail)
 router.post('/login/request-otp', requestOtp)

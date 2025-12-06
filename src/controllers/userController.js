@@ -9,8 +9,70 @@ import { influencerAddedTemplate } from '../Email Tamplates/influencerAddedTempl
 
 export const listUsers = async (req, res, next) => {
   try {
-    const users = await User.find().sort({ createdAt: -1 }).limit(100)
-    res.json(users)
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1)
+    const limit = Math.max(1, parseInt(req.query.limit || '10', 10) || 10)
+    const query = {}
+    const total = await User.countDocuments(query)
+    const rawItems = await User.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean()
+
+    const ids = rawItems.map(u => u._id)
+    const clientProfiles = await Client.find({ userId: { $in: ids } }).lean()
+    const influencerProfiles = await Influencer.find({ userId: { $in: ids } }).lean()
+    const clientMap = Object.create(null)
+    const influencerMap = Object.create(null)
+    for (const c of clientProfiles) clientMap[String(c.userId)] = c
+    for (const i of influencerProfiles) influencerMap[String(i.userId)] = i
+
+    const items = rawItems.map(u => {
+      const key = String(u._id)
+      const profile = u.role === 'client' ? (clientMap[key] || null) : (influencerMap[key] || null)
+      return { ...u, profile }
+    })
+    res.json({ items, page, limit, total, totalPages: Math.ceil(total / limit) })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const searchUsers = async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1)
+    const limit = Math.max(1, parseInt(req.query.limit || '10', 10) || 10)
+    const q = (req.query.q || '').toString().trim()
+    const role = (req.query.role || '').toString().trim()
+    const query = {}
+    if (role && ['client', 'influencer'].includes(role)) query.role = role
+    if (q) {
+      query.$or = [
+        { name: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+      ]
+    }
+    const total = await User.countDocuments(query)
+    const rawItems = await User.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean()
+
+    const ids = rawItems.map(u => u._id)
+    const clientProfiles = await Client.find({ userId: { $in: ids } }).lean()
+    const influencerProfiles = await Influencer.find({ userId: { $in: ids } }).lean()
+    const clientMap = Object.create(null)
+    const influencerMap = Object.create(null)
+    for (const c of clientProfiles) clientMap[String(c.userId)] = c
+    for (const i of influencerProfiles) influencerMap[String(i.userId)] = i
+
+    const items = rawItems.map(u => {
+      const key = String(u._id)
+      const profile = u.role === 'client' ? (clientMap[key] || null) : (influencerMap[key] || null)
+      return { ...u, profile }
+    })
+    res.json({ items, page, limit, total, totalPages: Math.ceil(total / limit) })
   } catch (err) {
     next(err)
   }

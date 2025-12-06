@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { sendEmail } from '../services/emailService.js'
-import { issueAdminToken } from '../services/authService.js'
+import { issueAdminToken, revokeAdminToken } from '../services/authService.js'
 import User from '../models/User.js'
 import { otpTemplate } from '../Email Tamplates/otpTemplate.js'
 
@@ -45,7 +45,7 @@ export const adminVerifyOtp = (req, res) => {
   if (hash !== adminOtpState.hash) return res.status(400).json({ error: 'invalid code' })
   adminOtpState.hash = null
   adminOtpState.expiresAt = null
-  const token = issueAdminToken(120)
+  const token = issueAdminToken()
   return res.json({ token, role: 'admin' })
 }
 
@@ -62,4 +62,10 @@ export const getAdminStats = async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'failed to load stats' })
   }
+}
+export const adminLogout = (req, res) => {
+  const token = req.headers['x-admin-token']
+  if (!token) return res.status(400).json({ error: 'missing token' })
+  revokeAdminToken(token)
+  return res.json({ ok: true })
 }
