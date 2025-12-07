@@ -2,6 +2,9 @@ import crypto from 'crypto'
 import User from '../models/User.js'
 import Client from '../models/Client.js'
 import Influencer from '../models/Influencer.js'
+import Campaign from '../models/Campaign.js'
+import Payment from '../models/Payment.js'
+import Post from '../models/Post.js'
 import { sendEmail } from '../services/emailService.js'
 import { otpTemplate } from '../Email Tamplates/otpTemplate.js'
 import { clientAddedTemplate } from '../Email Tamplates/clientAddedTemplate.js'
@@ -180,6 +183,157 @@ export const verifyOtp = async (req, res, next) => {
     user.otpExpiresAt = undefined
     await user.save()
     res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const getUserById = async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const u = await User.findById(id).lean()
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    let profile = null
+    if (u.role === 'client') {
+      profile = await Client.findOne({ userId: u._id }).lean()
+    } else if (u.role === 'influencer') {
+      profile = await Influencer.findOne({ userId: u._id }).lean()
+    }
+    res.json({ ...u, profile })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const updateUser = async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const { name, email, phoneNumber, profilePictures, client = {}, influencer = {} } = req.body || {}
+    const u = await User.findById(id)
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    if (email && email !== u.email) {
+      const exists = await User.findOne({ email })
+      if (exists) return res.status(409).json({ error: 'Email already exists' })
+      u.email = email
+    }
+    if (phoneNumber && phoneNumber !== u.phoneNumber) {
+      const exists = await User.findOne({ phoneNumber })
+      if (exists) return res.status(409).json({ error: 'Phone number already exists' })
+      u.phoneNumber = phoneNumber
+    }
+    if (name !== undefined) u.name = name
+    if (profilePictures !== undefined) u.profilePictures = profilePictures
+    await u.save()
+    let profile = null
+    if (u.role === 'client') {
+      const p = await Client.findOne({ userId: u._id })
+      if (p) {
+        p.companyName = client.companyName ?? p.companyName
+        p.industry = client.industry ?? p.industry
+        p.website = client.website ?? p.website
+        p.campaigns = client.campaigns !== undefined ? Number(client.campaigns || 0) : p.campaigns
+        p.niche = client.niche ?? p.niche
+        await p.save()
+        profile = p.toObject()
+      }
+    } else if (u.role === 'influencer') {
+      const p = await Influencer.findOne({ userId: u._id })
+      if (p) {
+        p.followers = influencer.followers ?? p.followers
+        p.engagement = influencer.engagement ?? p.engagement
+        p.niche = influencer.niche ?? p.niche
+        p.instagramHandle = influencer.instagramHandle ?? p.instagramHandle
+        await p.save()
+        profile = p.toObject()
+      }
+    }
+    res.json({ user: u.toObject(), profile })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const updateMe = async (req, res, next) => {
+  try {
+    const me = req.user?._id
+    const u = await User.findById(me)
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    const { name, phoneNumber, profilePictures, client = {}, influencer = {} } = req.body || {}
+    if (phoneNumber && phoneNumber !== u.phoneNumber) {
+      const exists = await User.findOne({ phoneNumber })
+      if (exists) return res.status(409).json({ error: 'Phone number already exists' })
+      u.phoneNumber = phoneNumber
+    }
+    if (name !== undefined) u.name = name
+    if (profilePictures !== undefined) u.profilePictures = profilePictures
+    await u.save()
+    let profile = null
+    if (u.role === 'client') {
+      const p = await Client.findOne({ userId: u._id })
+      if (p) {
+        p.companyName = client.companyName ?? p.companyName
+        p.industry = client.industry ?? p.industry
+        p.website = client.website ?? p.website
+        p.campaigns = client.campaigns !== undefined ? Number(client.campaigns || 0) : p.campaigns
+        p.niche = client.niche ?? p.niche
+        await p.save()
+        profile = p.toObject()
+      }
+    } else if (u.role === 'influencer') {
+      const p = await Influencer.findOne({ userId: u._id })
+      if (p) {
+        p.followers = influencer.followers ?? p.followers
+        p.engagement = influencer.engagement ?? p.engagement
+        p.niche = influencer.niche ?? p.niche
+        p.instagramHandle = influencer.instagramHandle ?? p.instagramHandle
+        await p.save()
+        profile = p.toObject()
+      }
+    }
+    res.json({ user: u.toObject(), profile })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const updateUserStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const { status } = req.body || {}
+    const allowed = ['active', 'completed']
+    if (!allowed.includes(String(status))) return res.status(400).json({ error: 'invalid status' })
+    const u = await User.findById(id)
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    u.isVerified = String(status) === 'completed'
+    await u.save()
+    res.json({ user: u.toObject() })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const deleteUser = async (req, res, next) => {
+  try {
+    const { id } = req.params
+    const u = await User.findById(id)
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    const clientProfile = await Client.findOne({ userId: id }).lean()
+    const influencerProfile = await Influencer.findOne({ userId: id }).lean()
+    const or = []
+    if (clientProfile) or.push({ clientId: clientProfile._id })
+    if (influencerProfile) or.push({ influencerId: influencerProfile._id })
+    let campaignIds = []
+    if (or.length) {
+      const campaigns = await Campaign.find({ $or: or }, { _id: 1 }).lean()
+      campaignIds = campaigns.map((c) => c._id)
+      if (campaignIds.length) {
+        await Post.deleteMany({ campaignId: { $in: campaignIds } })
+        await Payment.deleteMany({ campaignId: { $in: campaignIds } })
+        await Campaign.deleteMany({ _id: { $in: campaignIds } })
+      }
+    }
+    await u.deleteOne()
+    res.json({ ok: true, deletedCampaigns: campaignIds.length })
   } catch (err) {
     next(err)
   }

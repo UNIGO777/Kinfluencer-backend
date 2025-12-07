@@ -6,6 +6,7 @@ import { connectDB } from './src/config/db.js'
 import userRoutes from './src/routes/userRoutes.js'
 import adminRoutes from './src/routes/adminRoutes.js'
 import uploadRoutes from './src/routes/uploadRoutes.js'
+import campaignRoutes from './src/routes/campaignRoutes.js'
 import path from 'path'
 
 const app = express()
@@ -29,6 +30,7 @@ app.get('/health', (req, res) => {
 app.use('/api/users', userRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/upload', uploadRoutes)
+app.use('/api/campaigns', campaignRoutes)
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' })
