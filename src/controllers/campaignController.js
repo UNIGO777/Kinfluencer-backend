@@ -55,6 +55,7 @@ export const createCampaign = async (req, res, next) => {
         receivableDueDate: payment.receivableDueDate ? new Date(payment.receivableDueDate) : undefined,
         payableToInfluencer: Number(payment.payableToInfluencer || 0),
         paidToInfluencer: Number(payment.paidToInfluencer || 0),
+        paidDueDate: payment.paidDueDate ? new Date(payment.paidDueDate) : undefined,
       })
     }
     const populated = await Campaign.findById(c._id)
@@ -181,6 +182,7 @@ export const updateCampaign = async (req, res, next) => {
           receivableDueDate: payment.receivableDueDate ? new Date(payment.receivableDueDate) : undefined,
           payableToInfluencer: Number(payment.payableToInfluencer || 0),
           paidToInfluencer: Number(payment.paidToInfluencer || 0),
+          paidDueDate: payment.paidDueDate ? new Date(payment.paidDueDate) : undefined,
         })
       } else {
         existingPayment.receivedFromClient = Number(payment.receivedFromClient ?? existingPayment.receivedFromClient ?? 0)
@@ -188,6 +190,7 @@ export const updateCampaign = async (req, res, next) => {
         existingPayment.receivableDueDate = payment.receivableDueDate ? new Date(payment.receivableDueDate) : existingPayment.receivableDueDate
         existingPayment.payableToInfluencer = Number(payment.payableToInfluencer ?? existingPayment.payableToInfluencer ?? 0)
         existingPayment.paidToInfluencer = Number(payment.paidToInfluencer ?? existingPayment.paidToInfluencer ?? 0)
+        existingPayment.paidDueDate = payment.paidDueDate ? new Date(payment.paidDueDate) : existingPayment.paidDueDate
         await existingPayment.save()
       }
     }

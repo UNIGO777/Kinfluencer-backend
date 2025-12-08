@@ -7,6 +7,9 @@ const paymentSchema = new mongoose.Schema({
   receivableDueDate: { type: Date },
   payableToInfluencer: { type: Number, default: 0 },
   paidToInfluencer: { type: Number, default: 0 },
+  paidDueDate: { type: Date },
+  statusForClient: { type: String, default: 'pending' },
+  statusForInfluencer: { type: String, default: 'pending' },
 }, { timestamps: true })
 
 export default mongoose.models.Payment || mongoose.model('Payment', paymentSchema)

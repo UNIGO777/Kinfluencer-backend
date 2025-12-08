@@ -2,6 +2,8 @@ import crypto from 'crypto'
 import { sendEmail } from '../services/emailService.js'
 import { issueAdminToken, revokeAdminToken } from '../services/authService.js'
 import User from '../models/User.js'
+import Campaign from '../models/Campaign.js'
+import Payment from '../models/Payment.js'
 import { otpTemplate } from '../Email Tamplates/otpTemplate.js'
 
 const adminOtpState = { hash: null, expiresAt: null }
@@ -49,16 +51,85 @@ export const adminVerifyOtp = (req, res) => {
   return res.json({ token, role: 'admin' })
 }
 
-export const getAdminStats = async (req, res) => {
+export const getAdminStats = async (_req, res) => {
   try {
     const [clients, influencers] = await Promise.all([
       User.countDocuments({ role: 'client' }),
       User.countDocuments({ role: 'influencer' }),
     ])
-    const monthlyRevenue = 13520
-    const receivables = 4520
-    const campaignsCompleted = 36
-    res.json({ clients, influencers, monthlyRevenue, receivables, campaignsCompleted })
+    const now = new Date()
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+    const monthlyAgg = await Payment.aggregate([
+      { $match: { updatedAt: { $gte: startOfMonth, $lte: endOfMonth } } },
+      { $group: { _id: null, sum: { $sum: { $toDouble: '$receivedFromClient' } } } }
+    ])
+    const monthlyRevenue = Number(monthlyAgg[0]?.sum || 0)
+    const receivableAgg = await Payment.aggregate([
+      { $match: { receivableFromClient: { $gt: 0 } } },
+      { $group: { _id: null, sum: { $sum: { $toDouble: '$receivableFromClient' } } } }
+    ])
+    const receivables = Number(receivableAgg[0]?.sum || 0)
+    const campaignsCompleted = await Campaign.countDocuments({ status: 'completed' })
+
+    const campaignCounts = await Campaign.aggregate([
+      { $group: { _id: '$clientId', count: { $sum: 1 } } }
+    ])
+    const baseClients = campaignCounts.length
+    const returningClients = campaignCounts.filter(x => Number(x.count || 0) >= 2).length
+    const clientRetentionPercent = baseClients ? Math.round((returningClients * 100) / baseClients) : 0
+
+    const totalPayments = await Payment.countDocuments({})
+    const paidPayments = await Payment.countDocuments({ receivedFromClient: { $gt: 0 } })
+    const paymentStatusPercent = totalPayments ? Math.round((paidPayments * 100) / totalPayments) : 0
+
+    const twelveStart = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    const monthlySeries = await Payment.aggregate([
+      { $match: { updatedAt: { $gte: twelveStart, $lte: endOfMonth } } },
+      { $group: { _id: { y: { $year: '$updatedAt' }, m: { $month: '$updatedAt' } }, amount: { $sum: { $toDouble: '$receivedFromClient' } } } },
+      { $sort: { '_id.y': 1, '_id.m': 1 } }
+    ])
+    const seriesMap = new Map()
+    for (const row of monthlySeries) {
+      const key = `${row._id.y}-${String(row._id.m).padStart(2, '0')}`
+      seriesMap.set(key, Number(row.amount || 0))
+    }
+    const revenueByMonth = []
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = d.toLocaleString('en-US', { month: 'short' })
+      revenueByMonth.push({ label, amount: seriesMap.get(key) || 0 })
+    }
+
+    const sixStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+    const sixSeries = await Payment.aggregate([
+      { $match: { updatedAt: { $gte: sixStart, $lte: endOfMonth } } },
+      { $group: { _id: { y: { $year: '$updatedAt' }, m: { $month: '$updatedAt' } }, amount: { $sum: { $toDouble: '$receivedFromClient' } } } },
+      { $sort: { '_id.y': 1, '_id.m': 1 } }
+    ])
+    const sixMap = new Map()
+    for (const row of sixSeries) {
+      const key = `${row._id.y}-${String(row._id.m).padStart(2, '0')}`
+      sixMap.set(key, Number(row.amount || 0))
+    }
+    const fundsReceivedLast6 = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = d.toLocaleString('en-US', { month: 'short' })
+      fundsReceivedLast6.push({ label, amount: sixMap.get(key) || 0 })
+    }
+
+    res.json({
+      clients,
+      influencers,
+      monthlyRevenue,
+      receivables,
+      campaignsCompleted,
+      donuts: { clientRetentionPercent, paymentStatusPercent },
+      charts: { revenueByMonth, fundsReceivedLast6 }
+    })
   } catch (err) {
     res.status(500).json({ error: 'failed to load stats' })
   }
