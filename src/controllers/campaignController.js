@@ -281,3 +281,69 @@ export const listCampaignsByMe = async (req, res, next) => {
     next(err)
   }
 }
+
+export const listClientCampaigns = async (req, res, next) => {
+  try {
+    const userId = req.user?._id
+    const clientProfile = await Client.findOne({ userId }).lean()
+    if (!clientProfile) return res.json({ items: [], total: 0 })
+    const items = await Campaign.find({ clientId: clientProfile._id })
+      .sort({ createdAt: -1 })
+      .populate({ path: 'clientId', populate: { path: 'userId', select: 'name email', model: 'User' } })
+      .populate({ path: 'influencerId', populate: { path: 'userId', select: 'name email', model: 'User' } })
+      .populate({ path: 'posts', select: 'type createdAt' })
+      .lean()
+    res.json({ items, total: items.length })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const getClientCampaign = async (req, res, next) => {
+  try {
+    const userId = req.user?._id
+    const clientProfile = await Client.findOne({ userId }).lean()
+    if (!clientProfile) return res.status(404).json({ error: 'client profile not found' })
+    const { id } = req.params
+    const c = await Campaign.findOne({ _id: id, clientId: clientProfile._id })
+      .populate({ path: 'clientId', populate: { path: 'userId', select: 'name email', model: 'User' } })
+      .populate({ path: 'influencerId', populate: { path: 'userId', select: 'name email', model: 'User' } })
+      .populate({ path: 'posts', select: 'type notes createdAt engagement' })
+      .lean()
+    if (!c) return res.status(404).json({ error: 'campaign not found' })
+    const p = await Payment.findOne({ campaignId: id }).lean()
+    const payment = p ? {
+      receivedFromClient: Number(p.receivedFromClient || 0),
+      receivableFromClient: Number(p.receivableFromClient || 0),
+      receivableDueDate: p.receivableDueDate || null,
+      statusForClient: p.statusForClient || 'pending',
+    } : null
+    const posts = Array.isArray(c.posts) ? c.posts.map((post) => {
+      const eng = post?.engagement || {}
+      const total = Number(eng.views || 0) + Number(eng.likes || 0) + Number(eng.comments || 0) + Number(eng.shares || 0) + Number(eng.saves || 0)
+      return { ...post, posted: total > 0 }
+    }) : []
+    res.json({ campaign: c, posts, payment })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const getClientCampaignPost = async (req, res, next) => {
+  try {
+    const userId = req.user?._id
+    const clientProfile = await Client.findOne({ userId }).lean()
+    if (!clientProfile) return res.status(404).json({ error: 'client profile not found' })
+    const { id, postId } = req.params
+    const exists = await Campaign.exists({ _id: id, clientId: clientProfile._id })
+    if (!exists) return res.status(404).json({ error: 'campaign not found' })
+    const post = await Post.findOne({ _id: postId, campaignId: id }, { type: 1, notes: 1, engagement: 1, createdAt: 1 }).lean()
+    if (!post) return res.status(404).json({ error: 'post not found' })
+    const eng = post?.engagement || {}
+    const total = Number(eng.views || 0) + Number(eng.likes || 0) + Number(eng.comments || 0) + Number(eng.shares || 0) + Number(eng.saves || 0)
+    const posted = total > 0
+    res.json({ post: { ...post, posted } })
+  } catch (err) {
+    next(err)
+  }
+}
