@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAdmin } from '../services/authService.js'
-import { listPayments, todaySummary, todayReceived, todayPaid, receivableTodayList, payableDueTodayList, updatePayment, updatePaymentStatus, getPayment } from '../controllers/paymentController.js'
+import { listPayments, todaySummary, todayReceived, todayPaid, receivableTodayList, payableDueTodayList, allReceived, allPaid, updatePayment, updatePaymentStatus, getPayment } from '../controllers/paymentController.js'
 
 const router = Router()
 
@@ -10,6 +10,8 @@ router.get('/today/received', requireAdmin, todayReceived)
 router.get('/today/paid', requireAdmin, todayPaid)
 router.get('/today/receivable', requireAdmin, receivableTodayList)
 router.get('/today/payable-due', requireAdmin, payableDueTodayList)
+router.get('/all/received', requireAdmin, allReceived)
+router.get('/all/paid', requireAdmin, allPaid)
 
 router.put('/:id', requireAdmin, updatePayment)
 router.patch('/:id/status', requireAdmin, updatePaymentStatus)

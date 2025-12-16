@@ -165,6 +165,92 @@ export const payableDueTodayList = async (req, res, next) => {
   }
 }
 
+export const allReceived = async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1)
+    const limit = Math.max(1, parseInt(req.query.limit || '10', 10) || 10)
+    const q = (req.query.q || '').toString().trim()
+    const sd = req.query.startDate ? startOfDay(new Date(req.query.startDate)) : null
+    const ed = req.query.endDate ? endOfDay(new Date(req.query.endDate)) : null
+    const match = { receivedFromClient: { $gt: 0 } }
+    if (sd || ed) {
+      match.updatedAt = {}
+      if (sd) match.updatedAt.$gte = sd
+      if (ed) match.updatedAt.$lte = ed
+    }
+    const base = [
+      { $match: match },
+      { $lookup: { from: 'campaigns', localField: 'campaignId', foreignField: '_id', as: 'campaign' } },
+      { $unwind: { path: '$campaign', preserveNullAndEmptyArrays: true } },
+    ]
+    const nameFilter = q ? [{ $match: { 'campaign.name': { $regex: q, $options: 'i' } } }] : []
+    const totalAgg = await Payment.aggregate([...base, ...nameFilter, { $count: 'count' }])
+    const total = totalAgg[0]?.count || 0
+    const itemsAgg = await Payment.aggregate([
+      ...base,
+      ...nameFilter,
+      { $sort: { updatedAt: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      { $project: { _id: 1, campaignName: '$campaign.name', receivedFromClient: 1, statusForClient: 1, updatedAt: 1 } }
+    ])
+    const rows = itemsAgg.map((p) => ({
+      id: String(p._id),
+      campaignName: p.campaignName || '',
+      amount: Number(p.receivedFromClient || 0),
+      type: 'client',
+      date: p.updatedAt,
+      status: p.statusForClient || 'pending',
+    }))
+    res.json({ items: rows, page, limit, total, totalPages: Math.ceil(total / limit) })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const allPaid = async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1)
+    const limit = Math.max(1, parseInt(req.query.limit || '10', 10) || 10)
+    const q = (req.query.q || '').toString().trim()
+    const sd = req.query.startDate ? startOfDay(new Date(req.query.startDate)) : null
+    const ed = req.query.endDate ? endOfDay(new Date(req.query.endDate)) : null
+    const match = { paidToInfluencer: { $gt: 0 } }
+    if (sd || ed) {
+      match.updatedAt = {}
+      if (sd) match.updatedAt.$gte = sd
+      if (ed) match.updatedAt.$lte = ed
+    }
+    const base = [
+      { $match: match },
+      { $lookup: { from: 'campaigns', localField: 'campaignId', foreignField: '_id', as: 'campaign' } },
+      { $unwind: { path: '$campaign', preserveNullAndEmptyArrays: true } },
+    ]
+    const nameFilter = q ? [{ $match: { 'campaign.name': { $regex: q, $options: 'i' } } }] : []
+    const totalAgg = await Payment.aggregate([...base, ...nameFilter, { $count: 'count' }])
+    const total = totalAgg[0]?.count || 0
+    const itemsAgg = await Payment.aggregate([
+      ...base,
+      ...nameFilter,
+      { $sort: { updatedAt: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      { $project: { _id: 1, campaignName: '$campaign.name', paidToInfluencer: 1, statusForInfluencer: 1, updatedAt: 1 } }
+    ])
+    const rows = itemsAgg.map((p) => ({
+      id: String(p._id),
+      campaignName: p.campaignName || '',
+      amount: Number(p.paidToInfluencer || 0),
+      type: 'influencer',
+      date: p.updatedAt,
+      status: p.statusForInfluencer || 'pending',
+    }))
+    res.json({ items: rows, page, limit, total, totalPages: Math.ceil(total / limit) })
+  } catch (err) {
+    next(err)
+  }
+}
+
 export const updatePayment = async (req, res, next) => {
   try {
     const { id } = req.params

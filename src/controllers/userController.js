@@ -182,7 +182,7 @@ export const verifyOtp = async (req, res, next) => {
     user.otpHash = undefined
     user.otpExpiresAt = undefined
     await user.save()
-    res.json({ ok: true })
+    res.json({ ok: true, role: user.role, userId: user._id, email: user.email })
   } catch (err) {
     next(err)
   }
