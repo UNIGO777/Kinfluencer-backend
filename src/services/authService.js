@@ -29,9 +29,13 @@ export const requireAdmin = (req, res, next) => {
 
 export const requireUser = async (req, res, next) => {
   try {
-    const email = req.headers['x-user-email']
-    if (!email) return res.status(401).json({ error: 'x-user-email header required' })
-    const user = await User.findOne({ email })
+    const authHeader = req.headers['authorization'] || ''
+    const parts = authHeader.split(' ').filter(Boolean)
+    if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
+      return res.status(401).json({ error: 'authorization header required' })
+    }
+    const token = parts[1]
+    const user = await User.findOne({ authToken: token })
     if (!user) return res.status(404).json({ error: 'user not found' })
     if (!user.isVerified) return res.status(401).json({ error: 'user not verified' })
     req.user = user

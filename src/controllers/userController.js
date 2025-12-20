@@ -181,8 +181,27 @@ export const verifyOtp = async (req, res, next) => {
     user.otpVerifiedAt = new Date()
     user.otpHash = undefined
     user.otpExpiresAt = undefined
+    const token = crypto.randomBytes(32).toString('hex')
+    user.authToken = token
+    user.authTokenIssuedAt = new Date()
     await user.save()
-    res.json({ ok: true, role: user.role, userId: user._id, email: user.email })
+    res.json({ ok: true, role: user.role, userId: user._id, email: user.email, token })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const getMe = async (req, res, next) => {
+  try {
+    const u = await User.findById(req.user?._id).lean()
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    let profile = null
+    if (u.role === 'client') {
+      profile = await Client.findOne({ userId: u._id }).lean()
+    } else if (u.role === 'influencer') {
+      profile = await Influencer.findOne({ userId: u._id }).lean()
+    }
+    res.json({ ...u, profile })
   } catch (err) {
     next(err)
   }
@@ -248,6 +267,99 @@ export const updateUser = async (req, res, next) => {
       }
     }
     res.json({ user: u.toObject(), profile })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const requestEmailChangeOldOtp = async (req, res, next) => {
+  try {
+    const u = await User.findById(req.user?._id)
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    const hash = crypto.createHash('sha256').update(code).digest('hex')
+    u.otpHash = hash
+    u.otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000)
+    await u.save()
+    const subject = 'Confirm your email change'
+    const html = otpTemplate({ code, minutes: 10 })
+    try { await sendEmail({ to: u.email, subject, html }) } catch {}
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const verifyEmailChangeOldOtp = async (req, res, next) => {
+  try {
+    const { otp } = req.body || {}
+    const u = await User.findById(req.user?._id).select('+otpHash')
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    if (!otp) return res.status(400).json({ error: 'otp is required' })
+    if (!u.otpHash) return res.status(400).json({ error: 'invalid or expired code' })
+    if (!u.otpExpiresAt || u.otpExpiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ error: 'code expired' })
+    }
+    const hash = crypto.createHash('sha256').update(String(otp)).digest('hex')
+    if (hash !== u.otpHash) return res.status(400).json({ error: 'invalid code' })
+    u.otpHash = undefined
+    u.otpExpiresAt = undefined
+    u.emailChangeOldVerifiedAt = new Date()
+    await u.save()
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const requestEmailChangeNewOtp = async (req, res, next) => {
+  try {
+    const { newEmail } = req.body || {}
+    const u = await User.findById(req.user?._id)
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    if (!u.emailChangeOldVerifiedAt) return res.status(400).json({ error: 'old email not verified' })
+    const e = (newEmail || '').toString().trim().toLowerCase()
+    if (!e) return res.status(400).json({ error: 'newEmail is required' })
+    if (e === u.email) return res.status(400).json({ error: 'new email must be different' })
+    const exists = await User.findOne({ email: e })
+    if (exists) return res.status(409).json({ error: 'Email already exists' })
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    const hash = crypto.createHash('sha256').update(code).digest('hex')
+    u.emailChangeNewEmail = e
+    u.emailChangeOtpHash = hash
+    u.emailChangeOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000)
+    await u.save()
+    const subject = 'Verify your new email'
+    const html = otpTemplate({ code, minutes: 10 })
+    try { await sendEmail({ to: e, subject, html }) } catch {}
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const verifyEmailChangeNewOtp = async (req, res, next) => {
+  try {
+    const { otp } = req.body || {}
+    const u = await User.findById(req.user?._id).select('+emailChangeOtpHash')
+    if (!u) return res.status(404).json({ error: 'user not found' })
+    if (!otp) return res.status(400).json({ error: 'otp is required' })
+    const e = (u.emailChangeNewEmail || '').toString().trim().toLowerCase()
+    if (!e) return res.status(400).json({ error: 'new email not set' })
+    const exists = await User.findOne({ email: e })
+    if (exists) return res.status(409).json({ error: 'Email already exists' })
+    const hash = crypto.createHash('sha256').update(String(otp)).digest('hex')
+    if (!u.emailChangeOtpHash || !u.emailChangeOtpExpiresAt) return res.status(400).json({ error: 'invalid or expired code' })
+    if (u.emailChangeOtpExpiresAt.getTime() < Date.now()) return res.status(400).json({ error: 'code expired' })
+    if (hash !== u.emailChangeOtpHash) return res.status(400).json({ error: 'invalid code' })
+    u.email = e
+    u.emailChangeNewVerifiedAt = new Date()
+    u.emailChangeNewEmail = undefined
+    u.emailChangeOtpHash = undefined
+    u.emailChangeOtpExpiresAt = undefined
+    u.emailChangeOldVerifiedAt = undefined
+    await u.save()
+    res.json({ ok: true, email: u.email })
   } catch (err) {
     next(err)
   }

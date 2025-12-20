@@ -1,5 +1,6 @@
 import Payment from '../models/Payment.js'
 import Campaign from '../models/Campaign.js'
+import Client from '../models/Client.js'
 
 const startOfDay = (d) => {
   const dt = new Date(d)
@@ -270,7 +271,7 @@ export const updatePayment = async (req, res, next) => {
     if (receivableFromClient !== undefined) p.receivableFromClient = Number(receivableFromClient || 0)
     if (receivableDueDate !== undefined) p.receivableDueDate = receivableDueDate ? new Date(receivableDueDate) : undefined
     if (payableToInfluencer !== undefined) p.payableToInfluencer = Number(payableToInfluencer || 0)
-    if (paidToInfluencer !== undefined) p.paidToInfluencer = Number(paidToInfluencer || 0)
+    if (paidToInfluencer !== undefined) p.paidToInfluencer = Number(p.paidToInfluencer || 0)
     if (paidDueDate !== undefined) p.paidDueDate = paidDueDate ? new Date(paidDueDate) : undefined
     if (statusForClient !== undefined) p.statusForClient = String(statusForClient || 'pending')
     if (statusForInfluencer !== undefined) p.statusForInfluencer = String(statusForInfluencer || 'pending')
@@ -311,6 +312,46 @@ export const getPayment = async (req, res, next) => {
       .lean()
     if (!p) return res.status(404).json({ error: 'payment not found' })
     res.json({ payment: p })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const listClientPayments = async (req, res, next) => {
+  try {
+    const userId = req.user?._id
+    const clientProfile = await Client.findOne({ userId }).lean()
+    if (!clientProfile) return res.json({ items: [], total: 0 })
+    const itemsAgg = await Payment.aggregate([
+      { $lookup: { from: 'campaigns', localField: 'campaignId', foreignField: '_id', as: 'campaign' } },
+      { $unwind: { path: '$campaign', preserveNullAndEmptyArrays: false } },
+      { $match: { 'campaign.clientId': clientProfile._id } },
+      { $sort: { updatedAt: -1 } },
+      { $project: {
+          _id: 1,
+          campaignId: '$campaign._id',
+          campaignName: '$campaign.name',
+          receivedFromClient: 1,
+          receivableFromClient: 1,
+          receivableDueDate: 1,
+          statusForClient: 1,
+          updatedAt: 1,
+          createdAt: 1
+        }
+      },
+    ])
+    const rows = itemsAgg.map((p) => ({
+      id: String(p._id),
+      campaignId: String(p.campaignId || ''),
+      campaignName: p.campaignName || '',
+      receivedFromClient: Number(p.receivedFromClient || 0),
+      receivableFromClient: Number(p.receivableFromClient || 0),
+      receivableDueDate: p.receivableDueDate || null,
+      statusForClient: p.statusForClient || 'pending',
+      updatedAt: p.updatedAt,
+      createdAt: p.createdAt,
+    }))
+    res.json({ items: rows, total: rows.length })
   } catch (err) {
     next(err)
   }
