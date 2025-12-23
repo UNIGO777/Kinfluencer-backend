@@ -1,6 +1,7 @@
 import Payment from '../models/Payment.js'
 import Campaign from '../models/Campaign.js'
 import Client from '../models/Client.js'
+import Influencer from '../models/Influencer.js'
 
 const startOfDay = (d) => {
   const dt = new Date(d)
@@ -350,6 +351,85 @@ export const listClientPayments = async (req, res, next) => {
       statusForClient: p.statusForClient || 'pending',
       updatedAt: p.updatedAt,
       createdAt: p.createdAt,
+    }))
+    res.json({ items: rows, total: rows.length })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const listInfluencerPayments = async (req, res, next) => {
+  try {
+    const userId = req.user?._id
+    const influencerProfile = await Influencer.findOne({ userId }).lean()
+    if (!influencerProfile) return res.json({ items: [], total: 0 })
+    const itemsAgg = await Payment.aggregate([
+      { $lookup: { from: 'campaigns', localField: 'campaignId', foreignField: '_id', as: 'campaign' } },
+      { $unwind: { path: '$campaign', preserveNullAndEmptyArrays: false } },
+      { $match: { 'campaign.influencerId': influencerProfile._id } },
+      { $sort: { updatedAt: -1 } },
+      { $project: {
+          _id: 1,
+          campaignId: '$campaign._id',
+          campaignName: '$campaign.name',
+          payableToInfluencer: 1,
+          paidToInfluencer: 1,
+          paidDueDate: 1,
+          statusForInfluencer: 1,
+          updatedAt: 1,
+          createdAt: 1
+        }
+      },
+    ])
+    const rows = itemsAgg.map((p) => ({
+      id: String(p._id),
+      campaignId: String(p.campaignId || ''),
+      campaignName: p.campaignName || '',
+      payableToInfluencer: Number(p.payableToInfluencer || 0),
+      paidToInfluencer: Number(p.paidToInfluencer || 0),
+      paidDueDate: p.paidDueDate || null,
+      statusForInfluencer: p.statusForInfluencer || 'pending',
+      updatedAt: p.updatedAt,
+      createdAt: p.createdAt,
+    }))
+    res.json({ items: rows, total: rows.length })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const listInfluencerCampaignPayments = async (req, res, next) => {
+  try {
+    const userId = req.user?._id
+    const influencerProfile = await Influencer.findOne({ userId }).lean()
+    if (!influencerProfile) return res.json({ items: [], total: 0 })
+    const itemsAgg = await Campaign.aggregate([
+      { $match: { influencerId: influencerProfile._id } },
+      { $lookup: { from: 'payments', localField: '_id', foreignField: 'campaignId', as: 'payment' } },
+      { $unwind: { path: '$payment', preserveNullAndEmptyArrays: true } },
+      { $sort: { updatedAt: -1 } },
+      { $project: {
+          _id: 1,
+          name: 1,
+          payableToInfluencer: '$payment.payableToInfluencer',
+          paidToInfluencer: '$payment.paidToInfluencer',
+          paidDueDate: '$payment.paidDueDate',
+          statusForInfluencer: '$payment.statusForInfluencer',
+          updatedAt: '$payment.updatedAt',
+          createdAt: '$payment.createdAt'
+        }
+      },
+    ])
+    const rows = itemsAgg.map((c) => ({
+      id: String(c._id),
+      campaignId: String(c._id),
+      campaignName: c.name || '',
+      payableToInfluencer: Number(c.payableToInfluencer || 0),
+      paidToInfluencer: Number(c.paidToInfluencer || 0),
+      paidDueDate: c.paidDueDate || null,
+      statusForInfluencer: c.statusForInfluencer || 'pending',
+      updatedAt: c.updatedAt || null,
+      createdAt: c.createdAt || null,
     }))
     res.json({ items: rows, total: rows.length })
   } catch (err) {

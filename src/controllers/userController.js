@@ -565,3 +565,125 @@ export const getClientStats = async (req, res, next) => {
     next(err)
   }
 }
+
+export const getInfluencerStats = async (req, res, next) => {
+  try {
+    const me = req.user
+    if (!me || me.role !== 'influencer') return res.status(403).json({ error: 'influencer role required' })
+    const influencerProfile = await Influencer.findOne({ userId: me._id }).lean()
+    if (!influencerProfile) return res.status(404).json({ error: 'influencer profile not found' })
+
+    const campaigns = await Campaign.find({ influencerId: influencerProfile._id }, { _id: 1, status: 1, dueDate: 1, createdAt: 1 }).lean()
+    const campaignIds = campaigns.map(c => c._id)
+    const activeCampaigns = campaigns.filter(c => c.status === 'active').length
+    const now = new Date()
+    const in30 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30)
+    const upcomingDeliverables = campaigns.filter(c => c.dueDate && c.dueDate >= now && c.dueDate <= in30).length
+
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+
+    const monthlyAgg = await Payment.aggregate([
+      { $match: { campaignId: { $in: campaignIds }, updatedAt: { $gte: startOfMonth, $lte: endOfMonth } } },
+      { $group: { _id: null, sum: { $sum: { $toDouble: '$paidToInfluencer' } } } }
+    ])
+    const paymentsThisMonth = Number(monthlyAgg[0]?.sum || 0)
+
+    const payableAgg = await Payment.aggregate([
+      { $match: { campaignId: { $in: campaignIds }, payableToInfluencer: { $gt: 0 } } },
+      { $group: { _id: null, sum: { $sum: { $toDouble: '$payableToInfluencer' } } } }
+    ])
+    const receivables = Number(payableAgg[0]?.sum || 0)
+
+    const dueAgg = await Payment.aggregate([
+      { $match: { campaignId: { $in: campaignIds }, payableToInfluencer: { $gt: 0 }, paidDueDate: { $gte: startOfMonth, $lte: endOfMonth } } },
+      { $group: { _id: null, sum: { $sum: { $toDouble: '$payableToInfluencer' } } } }
+    ])
+    const dueThisMonth = Number(dueAgg[0]?.sum || 0)
+
+    const totalAgg = await Payment.aggregate([
+      { $match: { campaignId: { $in: campaignIds } } },
+      { $group: { _id: null, sum: { $sum: { $toDouble: '$paidToInfluencer' } } } }
+    ])
+    const totalEarned = Number(totalAgg[0]?.sum || 0)
+
+    const twelveStart = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    const monthlySeries = await Payment.aggregate([
+      { $match: { campaignId: { $in: campaignIds }, updatedAt: { $gte: twelveStart, $lte: endOfMonth } } },
+      { $group: { _id: { y: { $year: '$updatedAt' }, m: { $month: '$updatedAt' } }, amount: { $sum: { $toDouble: '$paidToInfluencer' } } } },
+      { $sort: { '_id.y': 1, '_id.m': 1 } }
+    ])
+    const seriesMap = new Map()
+    for (const row of monthlySeries) {
+      const key = `${row._id.y}-${String(row._id.m).padStart(2, '0')}`
+      seriesMap.set(key, Number(row.amount || 0))
+    }
+    const revenueByMonth = []
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = d.toLocaleString('en-US', { month: 'short' })
+      revenueByMonth.push({ label, amount: seriesMap.get(key) || 0 })
+    }
+
+    const postsTotalsAgg = await Post.aggregate([
+      { $match: { campaignId: { $in: campaignIds } } },
+      { $group: {
+        _id: null,
+        count: { $sum: 1 },
+        views: { $sum: { $ifNull: ['$engagement.views', 0] } },
+        likes: { $sum: { $ifNull: ['$engagement.likes', 0] } },
+        comments: { $sum: { $ifNull: ['$engagement.comments', 0] } },
+        shares: { $sum: { $ifNull: ['$engagement.shares', 0] } },
+        saves: { $sum: { $ifNull: ['$engagement.saves', 0] } },
+      } }
+    ])
+    const postsCount = Number(postsTotalsAgg[0]?.count || 0)
+    const engagementTotals = {
+      views: Number(postsTotalsAgg[0]?.views || 0),
+      likes: Number(postsTotalsAgg[0]?.likes || 0),
+      comments: Number(postsTotalsAgg[0]?.comments || 0),
+      shares: Number(postsTotalsAgg[0]?.shares || 0),
+      saves: Number(postsTotalsAgg[0]?.saves || 0),
+    }
+
+    const sixStart = new Date(now.getFullYear(), now.getMonth() - 5, 1)
+    const viewsMonthlyAgg = await Post.aggregate([
+      { $match: { campaignId: { $in: campaignIds }, updatedAt: { $gte: sixStart, $lte: endOfMonth } } },
+      { $group: { _id: { y: { $year: '$updatedAt' }, m: { $month: '$updatedAt' } }, views: { $sum: { $ifNull: ['$engagement.views', 0] } } } },
+      { $sort: { '_id.y': 1, '_id.m': 1 } }
+    ])
+    const viewsSeriesMap = new Map()
+    for (const row of viewsMonthlyAgg) {
+      const key = `${row._id.y}-${String(row._id.m).padStart(2, '0')}`
+      viewsSeriesMap.set(key, Number(row.views || 0))
+    }
+    const viewsByMonth = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const label = d.toLocaleString('en-US', { month: 'short' })
+      viewsByMonth.push({ label, views: viewsSeriesMap.get(key) || 0 })
+    }
+
+    const postsTypeAgg = await Post.aggregate([
+      { $match: { campaignId: { $in: campaignIds } } },
+      { $group: { _id: '$type', count: { $sum: 1 } } }
+    ])
+    const postsByType = postsTypeAgg.map(r => ({ label: r._id === 'reel' ? 'Reels' : 'Posts', count: Number(r.count || 0) }))
+
+    res.json({
+      activeCampaigns,
+      upcomingDeliverables,
+      paymentsThisMonth,
+      receivables,
+      totals: { campaigns: campaigns.length, posts: postsCount },
+      engagementTotals,
+      charts: { revenueByMonth, viewsByMonth, postsByType },
+      dueThisMonth,
+      totalInvested: totalEarned
+    })
+  } catch (err) {
+    next(err)
+  }
+}
